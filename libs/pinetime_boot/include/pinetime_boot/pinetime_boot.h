@@ -32,6 +32,7 @@ extern "C" {  //  Expose the types and functions below to C functions.
 #define BLUE 0x001F
 #define GREEN 0x07E0
 
+
 /// Init the display and render the boot graphic. Called by sysinit() during startup, defined in pkg.yml.
 void pinetime_boot_init(void);
 
@@ -41,12 +42,16 @@ int pinetime_boot_write_image(void);
 /// Display the boot logo to ST7789 display controller
 int pinetime_boot_display_image(void);
 
+int pinetime_boot_display_imageFlipImage(bool);
+
 /// Display the boot logo to ST7789 display controller using 2 colors. The first x lines (x = colorLine)
 /// will be drawn in color1, the rest in color2.
 int pinetime_boot_display_image_colors(uint16_t color1, uint16_t color2, uint8_t colorLine);
 
 /// Display the bootloader version to ST7789 display controller
 int pinetime_version_image(void);
+
+int fill_rect(int x, int y, int w, int h, uint16_t color);
 
 /// Clear the display
 void pinetime_clear_screen(void);

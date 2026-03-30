@@ -30,6 +30,7 @@
 #include "pinetime_boot/pinetime_boot.h"
 #include "pinetime_boot/pinetime_delay.h"
 #include "graphic.h"
+
 //  GPIO Pins. From rust\piet-embedded\piet-embedded-graphics\src\display.rs
 #define DISPLAY_SPI   0  //  Mynewt SPI port 0
 #define DISPLAY_CS   25  //  LCD_CS (P0.25): Chip select
@@ -108,6 +109,70 @@ static int transmit_spi(const uint8_t *data, uint16_t len);
 
 /// Buffer for reading flash and writing to display
 static uint8_t flash_buffer[COL_COUNT * BYTES_PER_PIXEL];
+//
+
+static uint16_t rlergb_to_rgb565(uint8_t p) {
+    uint8_t red3Bit = (p >> 5) & 0x07;
+    uint8_t g3bit = (p >> 2) & 0x07;
+    uint8_t b3bbit = p & 0x03;
+
+    uint8_t red8Bit = (red3Bit << 5) | (red3Bit << 2) | (red3Bit >> 1);
+    uint8_t g8bit = (g3bit << 5) | (g3bit << 2) | (g3bit >> 1);
+    uint8_t b8bit = (b3bbit << 6) | (b3bbit << 4) | (b3bbit << 2) | b3bbit;
+    return ((red8Bit & 0xF8) << 8) | ((g8bit & 0xFC) << 3) | (b8bit >> 3);
+}
+
+int pinetime_display_image_with_colors(struct imgInfo* info, int posX, int posY) {
+    int rc;
+    int y = 0;
+    uint16_t bufferIndex = 0;
+    int i = 0;
+
+    while (i < info->dataSize && y < info->height) {
+        uint8_t rleEncodedRGB = info->data[i++];
+        uint32_t runLength = 1;
+
+        if (i < info->dataSize && info->data[i] == rleEncodedRGB) {
+            i++;
+            runLength = 2;
+
+            uint32_t compiledRLBytes = 0;
+            while (i < info->dataSize) {
+                uint8_t singleRLByte = info->data[i++];
+                compiledRLBytes = (compiledRLBytes << 7) | (singleRLByte & 0x7F);
+                if ((singleRLByte & 0x80) == 0) {
+                    break;
+                }
+            }
+            runLength += compiledRLBytes;
+        }
+
+        uint16_t trueColor = rlergb_to_rgb565(rleEncodedRGB);
+
+        while (runLength && y < info->height) {
+            flash_buffer[bufferIndex]     = trueColor >> 8;
+            flash_buffer[bufferIndex + 1] = trueColor & 0xff;
+            bufferIndex += BYTES_PER_PIXEL;
+            runLength--;
+
+            if (bufferIndex >= (info->width * BYTES_PER_PIXEL)) {
+                rc = set_window(posX, y + posY, posX + info->width - 1, y + posY);
+                assert(rc == 0);
+
+                rc = write_command(RAMWR, NULL, 0);
+                assert(rc == 0);
+
+                rc = write_data(flash_buffer, info->width * BYTES_PER_PIXEL);
+                assert(rc == 0);
+
+                bufferIndex = 0;
+                y++;
+            }
+        }
+    }
+
+    return 0;
+}
 
 /// Display the image described by info to the ST7789 display controller using 2 colors. The first x lines (x = colorLine)
 /// will be drawn in color1, the rest in color2.
@@ -116,7 +181,7 @@ int pinetime_display_image_colors(struct imgInfo* info, int posX, int posY, uint
   int y = 0;
   uint16_t bufferIndex = 0;
   uint8_t isBackground = 1;
-  const uint16_t backgroundColor = BLACK;
+  const uint16_t backgroundColor = WHITE;
   uint16_t trueColor = backgroundColor;
 
   for (int i = 0; i < info->dataSize; i++) {
@@ -140,7 +205,7 @@ int pinetime_display_image_colors(struct imgInfo* info, int posX, int posY, uint
 
     if (isBackground) {
       isBackground = 0;
-      trueColor = (y < colorLine) ? color1 : color2;
+      trueColor = BLACK;
     }
     else {
       isBackground = 1;
@@ -165,31 +230,61 @@ void pinetime_clear_screen(void) {
   }
 }
 
-/// Display the image described by info at position (posX, posY) using default color (black and white)
 int pinetime_display_image(struct imgInfo* info, int posX, int posY) {
-  return pinetime_display_image_colors(info, posX, posY, WHITE, WHITE, 0);
+    return pinetime_display_image_with_colors(info, posX, posY);
 }
+
+int pinetime_display_image1bit(struct imgInfo* info, int posX, int posY) {
+    return pinetime_display_image_colors(info, posX, posY, BLACK, BLACK, 0);
+}
+
 
 /// Display the boot logo to ST7789 display controller
 int pinetime_boot_display_image(void) {
-  console_printf("Displaying boot logo...\n");  console_flush();
+    console_printf("Displaying boot logo...\n");  console_flush();
 
-  int rc = init_display();  assert(rc == 0);
-  rc = set_orientation(Landscape);  assert(rc == 0);
-  pinetime_clear_screen();
-  return pinetime_display_image(&bootLogoInfo, 0, 0);
+    int rc = init_display();  assert(rc == 0);
+    rc = set_orientation(Landscape);  assert(rc == 0);
+    return pinetime_display_image(&bootLogo2Info, 0, 0);
+}
+int pinetime_boot_display_imageFlipImage(bool flip) {
+    console_printf("Displaying boot logo...\n");  console_flush();
+    if (flip) {
+        return pinetime_display_image(&bootLogo2Info, 0, 0);
+    }
+    return pinetime_display_image(&bootLogoInfo, 0, 0);
 }
 
 /// Display the boot logo to ST7789 display controller using 2 colors. The first x lines (x = colorLine)
 /// will be drawn in color1, the rest in color2.
 int pinetime_boot_display_image_colors(uint16_t color1, uint16_t color2, uint8_t colorLine) {
-  return pinetime_display_image_colors(&bootLogoInfo, 0, 0, color1, color2, colorLine);
+  return pinetime_display_image_with_colors(&bootLogoInfo, 0, 0);
 }
 
 /// Display the bootloader version to ST7789 display controller on the bottom of the display (centered)
 int pinetime_version_image(void) {
-  console_printf("Displaying version image...\n"); console_flush();
-  return pinetime_display_image(&versionInfo, (COL_COUNT/2) - (versionInfo.width/2), ROW_COUNT - (versionInfo.height));
+    fill_rect(0, ROW_COUNT - versionInfo.height, COL_COUNT, versionInfo.height, WHITE);
+    return pinetime_display_image1bit(&versionInfo, (COL_COUNT) - (versionInfo.width / 2), ROW_COUNT - versionInfo.height);
+}
+
+int fill_rect(int x, int y, int w, int h, uint16_t color) {
+    int rc;
+
+    for (int i = 0; i < w; i++) {
+        flash_buffer[i * 2]     = color >> 8;
+        flash_buffer[i * 2 + 1] = color & 0xff;
+    }
+
+    for (int row = 0; row < h; row++) {
+        rc = set_window(x, y + row, x + w - 1, y + row);
+        assert(rc == 0);
+        rc = write_command(RAMWR, NULL, 0);
+        assert(rc == 0);
+        rc = write_data(flash_buffer, w * BYTES_PER_PIXEL);
+        assert(rc == 0);
+    }
+
+    return 0;
 }
 
 /// Set the ST7789 display window to the coordinates (left, top), (right, bottom)

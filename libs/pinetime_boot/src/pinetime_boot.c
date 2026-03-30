@@ -62,19 +62,25 @@ void pinetime_boot_init(void) {
     //  Display the image.
     pinetime_boot_display_image();
 
-    // Display version image
-    pinetime_version_image();
-
     //  Wait 5 seconds for button press.
     uint32_t button_samples = 0;
     console_printf("Waiting 5 seconds for button...\n");  console_flush();
-    for (int i = 0; i < 64 * 5; i++) {
+    bool animateFirst = false;
+    for (int i = 0; i < 64 * 30; i++) {
         for (int delay = 0; delay < 3000; delay++) {
             button_samples += hal_gpio_read(PUSH_BUTTON_IN);
         }
         if(i % 64 == 0) {
-          console_printf("step %d - %d\n", (i / (64)) + 1, (int)button_samples); console_flush();
-          hal_watchdog_tickle();
+            console_printf("step %d - %d\n", (i / (64)) + 1, (int)button_samples); console_flush();
+            hal_watchdog_tickle();
+        }
+
+        if(i % 128 == 0) {
+            animateFirst = !animateFirst;
+        }
+        if (i % 136 == 0) {
+            pinetime_version_image();
+            animateFirst = !animateFirst;
         }
 
         if(i % 8 == 0) {
@@ -87,7 +93,7 @@ void pinetime_boot_init(void) {
             color = RED;
           }
 
-          pinetime_boot_display_image_colors(WHITE, color, 240 - ((i / 8) * 6) + 1);
+            pinetime_boot_display_imageFlipImage(animateFirst);
         }
     }
     console_printf("Waited 5 seconds (%d)\n", (int)button_samples);  console_flush();
